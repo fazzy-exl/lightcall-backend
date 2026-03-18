@@ -1,0 +1,14 @@
+{
+  "name": "lightcall-backend",
+  "version": "1.0.0",
+  "main": "api.js",
+  "scripts": {
+    "start": "node api.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.13.0",
+    "better-sqlite3": "^8.0.0",
+    "cors": "^2.8.5"
+  }
+}
