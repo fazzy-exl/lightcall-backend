@@ -110,6 +110,26 @@ app.get('/servers/:server_id/channels', (req, res) => {
     res.json(channels);
 });
 
+// --- Supprimer un serveur ---
+app.delete('/servers/:server_id/delete', (req, res) => {
+    const server_id = req.params.server_id;
+
+    // Supprimer les membres du serveur
+    db.prepare(`DELETE FROM server_members WHERE server_id = ?`).run(server_id);
+
+    // Supprimer les salons du serveur
+    db.prepare(`DELETE FROM channels WHERE server_id = ?`).run(server_id);
+
+    // Supprimer le serveur
+    const result = db.prepare(`DELETE FROM servers WHERE id = ?`).run(server_id);
+
+    if (result.changes === 0) {
+        return res.status(404).json({ error: "Server not found" });
+    }
+
+    res.json({ success: true });
+});
+
 const http = require('http');
 const startWebSocket = require('./websocket');
 
