@@ -130,6 +130,26 @@ app.delete('/servers/:server_id/delete', (req, res) => {
     res.json({ success: true });
 });
 
+// --- Renommer un serveur ---
+app.put('/servers/:server_id/rename', (req, res) => {
+    const server_id = req.params.server_id;
+    const { new_name } = req.body;
+
+    if (!new_name || !new_name.trim()) {
+        return res.status(400).json({ error: "Nom invalide" });
+    }
+
+    const result = db.prepare(`
+        UPDATE servers SET name = ? WHERE id = ?
+    `).run(new_name.trim(), server_id);
+
+    if (result.changes === 0) {
+        return res.status(404).json({ error: "Serveur introuvable" });
+    }
+
+    res.json({ success: true, new_name });
+});
+
 const http = require('http');
 const startWebSocket = require('./websocket');
 
