@@ -1,20 +1,22 @@
 const express = require("express");
 const router = express.Router();
-const pool = require("../db");
+const db = require("../database");
 
 // -------------------------------
 // GET : serveurs d’un utilisateur
 // -------------------------------
-router.get("/servers/:userId", async (req, res) => {
+router.get("/servers/:userId", (req, res) => {
     const { userId } = req.params;
 
     try {
-        const result = await pool.query(
-            "SELECT * FROM servers WHERE owner_id = $1",
-            [userId]
-        );
+        const servers = db.prepare(`
+            SELECT servers.id, servers.name, servers.owner_id
+            FROM servers
+            JOIN server_members ON servers.id = server_members.server_id
+            WHERE server_members.user_id = ?
+        `).all(userId);
 
-        res.json(result.rows);
+        res.json(servers);
 
     } catch (err) {
         console.error("Erreur GET servers:", err);
@@ -25,20 +27,36 @@ router.get("/servers/:userId", async (req, res) => {
 // -------------------------------
 // POST : créer un serveur
 // -------------------------------
-router.post("/servers/create", async (req, res) => {
+router.post("/servers/create", (req, res) => {
     const { name, owner_id } = req.body;
 
-    if (!name) return res.status(400).json({ error: "Nom requis" });
+    if (!name || !owner_id) {
+        return res.status(400).json({ error: "Missing name or owner_id" });
+    }
 
-    const invite_code = Math.random().toString(36).substring(2, 8);
+    const inviteCode = Math.random().toString(36).substring(2, 10);
 
     try {
-        const result = await pool.query(
-            "INSERT INTO servers (name, owner_id, invite_code) VALUES ($1, $2, $3) RETURNING *",
-            [name, owner_id, invite_code]
-        );
+        const result = db.prepare(`
+            INSERT INTO servers (name, owner_id, invite_code)
+            VALUES (?, ?, ?)
+        `).run(name, owner_id, inviteCode);
 
-        res.json(result.rows[0]);
+        db.prepare(`
+            INSERT INTO server_members (server_id, user_id, role)
+            VALUES (?, ?, 'owner')
+        `).run(result.lastInsertRowid, owner_id);
+
+        db.prepare(`
+            INSERT INTO channels (server_id, name, type)
+            VALUES (?, 'Général', 'voice')
+        `).run(result.lastInsertRowid);
+
+        res.json({
+            success: true,
+            server_id: result.lastInsertRowid,
+            invite_code: inviteCode
+        });
 
     } catch (err) {
         console.error("Erreur create server:", err);
@@ -47,14 +65,101 @@ router.post("/servers/create", async (req, res) => {
 });
 
 // -------------------------------
-// DELETE : supprimer un serveur
+// POST : rejoindre un serveur
 // -------------------------------
-router.delete("/servers/:id/delete", async (req, res) => {
-    const { id } = req.params;
+router.post("/servers/join", (req, res) => {
+    const { server_id, user_id } = req.body;
+
+    if (!server_id || !user_id) {
+        return res.status(400).json({ error: "Missing server_id or user_id" });
+    }
 
     try {
-        await pool.query("DELETE FROM servers WHERE id = $1", [id]);
-        res.json({ message: "Serveur supprimé" });
+        db.prepare(`
+            INSERT INTO server_members (server_id, user_id, role)
+            VALUES (?, ?, 'member')
+        `).run(server_id, user_id);
+
+        res.json({ success: true });
+
+    } catch (err) {
+        console.error("Erreur join server:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+// -------------------------------
+// POST : rejoindre via code
+// -------------------------------
+router.post("/servers/join-by-code", (req, res) => {
+    const { invite_code, user_id } = req.body;
+
+    if (!invite_code || !user_id) {
+        return res.status(400).json({ error: "Missing invite_code or user_id" });
+    }
+
+    try {
+        const server = db.prepare(`
+            SELECT * FROM servers WHERE invite_code = ?
+        `).get(invite_code);
+
+        if (!server) {
+            return res.status(404).json({ error: "Invalid invite code" });
+        }
+
+        db.prepare(`
+            INSERT INTO server_members (server_id, user_id, role)
+            VALUES (?, ?, 'member')
+        `).run(server.id, user_id);
+
+        res.json({
+            success: true,
+            server_id: server.id,
+            server_name: server.name
+        });
+
+    } catch (err) {
+        console.error("Erreur join-by-code:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+// -------------------------------
+// GET : salons d’un serveur
+// -------------------------------
+router.get("/servers/:server_id/channels", (req, res) => {
+    const { server_id } = req.params;
+
+    try {
+        const channels = db.prepare(`
+            SELECT * FROM channels WHERE server_id = ?
+        `).all(server_id);
+
+        res.json(channels);
+
+    } catch (err) {
+        console.error("Erreur channels:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+// -------------------------------
+// DELETE : supprimer un serveur
+// -------------------------------
+router.delete("/servers/:server_id/delete", (req, res) => {
+    const { server_id } = req.params;
+
+    try {
+        db.prepare(`DELETE FROM server_members WHERE server_id = ?`).run(server_id);
+        db.prepare(`DELETE FROM channels WHERE server_id = ?`).run(server_id);
+
+        const result = db.prepare(`DELETE FROM servers WHERE id = ?`).run(server_id);
+
+        if (result.changes === 0) {
+            return res.status(404).json({ error: "Server not found" });
+        }
+
+        res.json({ success: true });
 
     } catch (err) {
         console.error("Erreur delete server:", err);
@@ -65,8 +170,8 @@ router.delete("/servers/:id/delete", async (req, res) => {
 // -------------------------------
 // PUT : renommer un serveur
 // -------------------------------
-router.put("/servers/:id/rename", async (req, res) => {
-    const { id } = req.params;
+router.put("/servers/:server_id/rename", (req, res) => {
+    const { server_id } = req.params;
     const { new_name } = req.body;
 
     if (!new_name || !new_name.trim()) {
@@ -74,19 +179,15 @@ router.put("/servers/:id/rename", async (req, res) => {
     }
 
     try {
-        const result = await pool.query(
-            "UPDATE servers SET name = $1 WHERE id = $2 RETURNING id, name",
-            [new_name.trim(), id]
-        );
+        const result = db.prepare(`
+            UPDATE servers SET name = ? WHERE id = ?
+        `).run(new_name.trim(), server_id);
 
-        if (result.rowCount === 0) {
+        if (result.changes === 0) {
             return res.status(404).json({ error: "Serveur introuvable" });
         }
 
-        res.json({
-            message: "Serveur renommé",
-            server: result.rows[0]
-        });
+        res.json({ success: true, new_name });
 
     } catch (err) {
         console.error("Erreur rename server:", err);
