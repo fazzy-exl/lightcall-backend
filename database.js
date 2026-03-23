@@ -49,3 +49,13 @@ CREATE TABLE IF NOT EXISTS channels (
 `).run();
 
 module.exports = db;
+
+// USERS
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        created_at TEXT
+    )
+`).run();

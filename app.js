@@ -13,3 +13,6 @@ app.use(serverRoutes);
 // Lancement du serveur
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Backend LightCall lancé sur le port", PORT));
+
+const authRoutes = require("./routes/auth");
+app.use(authRoutes);
