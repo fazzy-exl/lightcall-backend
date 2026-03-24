@@ -1,11 +1,12 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../database");
+const bcrypt = require("bcrypt");
 
 // -------------------------------
 // POST : créer un compte
 // -------------------------------
-router.post("/auth/register", (req, res) => {
+router.post("/register", async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -13,10 +14,13 @@ router.post("/auth/register", (req, res) => {
     }
 
     try {
+        // Hash du mot de passe
+        const hashedPassword = await bcrypt.hash(password, 10);
+
         const result = db.prepare(`
-            INSERT INTO users (username, password, created_at)
+            INSERT INTO users (username, password_hash, created_at)
             VALUES (?, ?, datetime('now'))
-        `).run(username, password);
+        `).run(username, hashedPassword);
 
         res.json({
             success: true,
@@ -32,7 +36,7 @@ router.post("/auth/register", (req, res) => {
 // -------------------------------
 // POST : connexion
 // -------------------------------
-router.post("/auth/login", (req, res) => {
+router.post("/login", async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -40,10 +44,17 @@ router.post("/auth/login", (req, res) => {
     }
 
     const user = db.prepare(`
-        SELECT * FROM users WHERE username = ? AND password = ?
-    `).get(username, password);
+        SELECT * FROM users WHERE username = ?
+    `).get(username);
 
     if (!user) {
+        return res.status(401).json({ error: "Invalid username or password" });
+    }
+
+    // Vérifier le mot de passe haché
+    const valid = await bcrypt.compare(password, user.password_hash);
+
+    if (!valid) {
         return res.status(401).json({ error: "Invalid username or password" });
     }
 

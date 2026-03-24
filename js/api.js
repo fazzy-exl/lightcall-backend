@@ -3,6 +3,7 @@ const cors = require("cors");
 const http = require("http");
 
 const serverRoutes = require("./routes/servers");
+const authRoutes = require("./routes/auth");
 const startWebSocket = require("./websocket");
 
 const app = express();
@@ -12,6 +13,7 @@ app.use(express.json());
 
 // Routes API
 app.use("/", serverRoutes);
+app.use("/", authRoutes);
 
 // WebSocket
 const server = http.createServer(app);

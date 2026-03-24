@@ -195,4 +195,29 @@ router.put("/servers/:server_id/rename", (req, res) => {
     }
 });
 
+// -------------------------------
+// GET : infos d’un serveur
+// -------------------------------
+router.get("/server-info/:server_id", (req, res) => {
+    const { server_id } = req.params;
+
+    try {
+        const server = db.prepare(`
+            SELECT id, name, owner_id, invite_code
+            FROM servers
+            WHERE id = ?
+        `).get(server_id);
+
+        if (!server) {
+            return res.status(404).json({ error: "Serveur introuvable" });
+        }
+
+        res.json(server);
+
+    } catch (err) {
+        console.error("Erreur GET server info:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
 module.exports = router;

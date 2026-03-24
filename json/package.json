@@ -1,9 +1,9 @@
 {
   "name": "lightcall-backend",
   "version": "1.0.0",
-  "main": "api.js",
+  "main": "../js/api.js",
   "scripts": {
-    "start": "node api.js"
+    "start": "node ../js/api.js"
   },
   "engines": {
     "node": "18.x"
