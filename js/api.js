@@ -2,9 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 
-const serverRoutes = require("../js/routes/servers");
-const authRoutes = require("../js/routes/auth");
-const startWebSocket = require("../js/websocket");
+const serverRoutes = require("./routes/servers");
+const authRoutes = require("./routes/auth");
+const startWebSocket = require("./websocket");
 
 const app = express();
 
