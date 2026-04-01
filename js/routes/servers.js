@@ -2,9 +2,73 @@ const express = require("express");
 const router = express.Router();
 const db = require("../database");
 
-// -------------------------------
+/* ----------------------------------------------------
+   1) ROUTES SPÉCIFIQUES (doivent être AVANT les génériques)
+---------------------------------------------------- */
+
+// GET : infos complètes d’un serveur
+router.get("/servers/:server_id/full", (req, res) => {
+    const { server_id } = req.params;
+
+    try {
+        const server = db.prepare(`
+            SELECT id, name, owner_id, invite_code
+            FROM servers
+            WHERE id = ?
+        `).get(server_id);
+
+        if (!server) {
+            return res.status(404).json({ error: "Serveur introuvable" });
+        }
+
+        const channels = db.prepare(`
+            SELECT id, name, type
+            FROM channels
+            WHERE server_id = ?
+        `).all(server_id);
+
+        const members = db.prepare(`
+            SELECT users.id, users.username, server_members.role
+            FROM server_members
+            JOIN users ON users.id = server_members.user_id
+            WHERE server_members.server_id = ?
+        `).all(server_id);
+
+        res.json({
+            ...server,
+            text_channels: channels.filter(c => c.type === "text"),
+            voice_channels: channels.filter(c => c.type === "voice"),
+            members
+        });
+
+    } catch (err) {
+        console.error("Erreur GET full server:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+// GET : salons d’un serveur
+router.get("/servers/:server_id/channels", (req, res) => {
+    const { server_id } = req.params;
+
+    try {
+        const channels = db.prepare(`
+            SELECT * FROM channels WHERE server_id = ?
+        `).all(server_id);
+
+        res.json(channels);
+
+    } catch (err) {
+        console.error("Erreur channels:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+/* ----------------------------------------------------
+   2) ROUTES GÉNÉRIQUES (doivent être APRÈS les spécifiques)
+---------------------------------------------------- */
+
 // GET : serveurs d’un utilisateur
-// -------------------------------
 router.get("/servers/:userId", (req, res) => {
     const { userId } = req.params;
 
@@ -24,9 +88,11 @@ router.get("/servers/:userId", (req, res) => {
     }
 });
 
-// -------------------------------
+/* ----------------------------------------------------
+   3) AUTRES ROUTES
+---------------------------------------------------- */
+
 // POST : créer un serveur
-// -------------------------------
 router.post("/servers/create", (req, res) => {
     const { name, owner_id } = req.body;
 
@@ -47,6 +113,7 @@ router.post("/servers/create", (req, res) => {
             VALUES (?, ?, 'owner')
         `).run(result.lastInsertRowid, owner_id);
 
+        // Créer un salon vocal par défaut
         db.prepare(`
             INSERT INTO channels (server_id, name, type)
             VALUES (?, 'Général', 'voice')
@@ -64,9 +131,7 @@ router.post("/servers/create", (req, res) => {
     }
 });
 
-// -------------------------------
 // POST : rejoindre un serveur
-// -------------------------------
 router.post("/servers/join", (req, res) => {
     const { server_id, user_id } = req.body;
 
@@ -88,9 +153,7 @@ router.post("/servers/join", (req, res) => {
     }
 });
 
-// -------------------------------
 // POST : rejoindre via code
-// -------------------------------
 router.post("/servers/join-by-code", (req, res) => {
     const { invite_code, user_id } = req.body;
 
@@ -124,28 +187,7 @@ router.post("/servers/join-by-code", (req, res) => {
     }
 });
 
-// -------------------------------
-// GET : salons d’un serveur
-// -------------------------------
-router.get("/servers/:server_id/channels", (req, res) => {
-    const { server_id } = req.params;
-
-    try {
-        const channels = db.prepare(`
-            SELECT * FROM channels WHERE server_id = ?
-        `).all(server_id);
-
-        res.json(channels);
-
-    } catch (err) {
-        console.error("Erreur channels:", err);
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-// -------------------------------
 // DELETE : supprimer un serveur
-// -------------------------------
 router.delete("/servers/:server_id/delete", (req, res) => {
     const { server_id } = req.params;
 
@@ -167,9 +209,7 @@ router.delete("/servers/:server_id/delete", (req, res) => {
     }
 });
 
-// -------------------------------
 // PUT : renommer un serveur
-// -------------------------------
 router.put("/servers/:server_id/rename", (req, res) => {
     const { server_id } = req.params;
     const { new_name } = req.body;
@@ -191,31 +231,6 @@ router.put("/servers/:server_id/rename", (req, res) => {
 
     } catch (err) {
         console.error("Erreur rename server:", err);
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-// -------------------------------
-// GET : infos d’un serveur
-// -------------------------------
-router.get("/server-info/:server_id", (req, res) => {
-    const { server_id } = req.params;
-
-    try {
-        const server = db.prepare(`
-            SELECT id, name, owner_id, invite_code
-            FROM servers
-            WHERE id = ?
-        `).get(server_id);
-
-        if (!server) {
-            return res.status(404).json({ error: "Serveur introuvable" });
-        }
-
-        res.json(server);
-
-    } catch (err) {
-        console.error("Erreur GET server info:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });

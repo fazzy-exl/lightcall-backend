@@ -8,7 +8,7 @@ app.use(express.json());
 
 // Routes
 const serverRoutes = require("./routes/servers");
-app.use(serverRoutes);
+app.use("/api", serverRoutes);
 
 // Lancement du serveur
 const PORT = process.env.PORT || 3000;
