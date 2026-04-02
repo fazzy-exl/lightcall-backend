@@ -108,20 +108,29 @@ router.post("/servers/create", (req, res) => {
             VALUES (?, ?, ?)
         `).run(name, owner_id, inviteCode);
 
+        const serverId = result.lastInsertRowid;
+
+        // Ajouter le créateur comme owner
         db.prepare(`
             INSERT INTO server_members (server_id, user_id, role)
             VALUES (?, ?, 'owner')
-        `).run(result.lastInsertRowid, owner_id);
+        `).run(serverId, owner_id);
 
-        // Créer un salon vocal par défaut
+        // 🔥 Ajouter un salon textuel par défaut
+        db.prepare(`
+            INSERT INTO channels (server_id, name, type)
+            VALUES (?, 'général', 'text')
+        `).run(serverId);
+
+        // 🔥 Ajouter un salon vocal par défaut
         db.prepare(`
             INSERT INTO channels (server_id, name, type)
             VALUES (?, 'Général', 'voice')
-        `).run(result.lastInsertRowid);
+        `).run(serverId);
 
         res.json({
             success: true,
-            server_id: result.lastInsertRowid,
+            server_id: serverId,
             invite_code: inviteCode
         });
 
@@ -129,6 +138,10 @@ router.post("/servers/create", (req, res) => {
         console.error("Erreur create server:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
+
+    const test = db.prepare("SELECT * FROM channels WHERE server_id = ?").all(serverId);
+    console.log("Channels après création :", test);
+
 });
 
 // POST : rejoindre un serveur
