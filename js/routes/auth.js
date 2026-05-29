@@ -14,7 +14,6 @@ router.post("/register", async (req, res) => {
     }
 
     try {
-        // Hash du mot de passe
         const hashedPassword = await bcrypt.hash(password, 10);
 
         const result = db.prepare(`
@@ -51,7 +50,6 @@ router.post("/login", async (req, res) => {
         return res.status(401).json({ error: "Invalid username or password" });
     }
 
-    // Vérifier le mot de passe haché
     const valid = await bcrypt.compare(password, user.password_hash);
 
     if (!valid) {
@@ -64,4 +62,24 @@ router.post("/login", async (req, res) => {
     });
 });
 
+// -------------------------------
+// GET : récupérer un utilisateur par ID
+// -------------------------------
+router.get("/users/:id", (req, res) => {
+    const userId = req.params.id;
+
+    const user = db.prepare(`
+        SELECT id, username, created_at
+        FROM users
+        WHERE id = ?
+    `).get(userId);
+
+    if (!user) {
+        return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json(user);
+});
+
+// 👉 IMPORTANT : exporter APRÈS toutes les routes
 module.exports = router;

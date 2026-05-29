@@ -2,85 +2,69 @@ const WebSocket = require("ws");
 
 function startWebSocket(server) {
     const wss = new WebSocket.Server({ server });
-
-    // Map des clients : userId -> ws
     const clients = new Map();
 
     wss.on("connection", (ws) => {
         ws.userId = null;
+        ws.channelId = null;
 
         ws.on("message", (raw) => {
             let msg;
-            try {
-                msg = JSON.parse(raw);
-            } catch (e) {
-                console.error("Message invalide:", raw.toString());
-                return;
-            }
+            try { msg = JSON.parse(raw); }
+            catch (e) { console.error("Message invalide:", raw.toString()); return; }
 
-            // 1) Un client rejoint : { type: "join", id }
+            // Rejoindre (WebRTC vocal)
             if (msg.type === "join") {
                 ws.userId = msg.id;
+                ws.channelId = msg.channel || null;
                 clients.set(msg.id, ws);
                 console.log("Client rejoint :", msg.id);
-
-                // Notifier les autres qu'un nouveau arrive
-                broadcastExcept(ws, {
-                    type: "join",
-                    id: msg.id
-                });
+                broadcastExcept(ws, { type: "join", id: msg.id });
                 return;
             }
 
-            // Si on n'a pas encore d'id, on ignore
             if (!ws.userId) return;
 
-            // 2) Offer : { type: "offer", id, target, offer }
+            // Offer WebRTC
             if (msg.type === "offer") {
-                const targetWs = clients.get(msg.target);
-                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                    targetWs.send(JSON.stringify({
-                        type: "offer",
-                        id: ws.userId,
-                        offer: msg.offer
-                    }));
-                }
+                const target = clients.get(msg.target);
+                if (target?.readyState === WebSocket.OPEN)
+                    target.send(JSON.stringify({ type: "offer", id: ws.userId, offer: msg.offer }));
                 return;
             }
 
-            // 3) Answer : { type: "answer", id, target, answer }
+            // Answer WebRTC
             if (msg.type === "answer") {
-                const targetWs = clients.get(msg.target);
-                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                    targetWs.send(JSON.stringify({
-                        type: "answer",
-                        id: ws.userId,
-                        answer: msg.answer
-                    }));
-                }
+                const target = clients.get(msg.target);
+                if (target?.readyState === WebSocket.OPEN)
+                    target.send(JSON.stringify({ type: "answer", id: ws.userId, answer: msg.answer }));
                 return;
             }
 
-            // 4) ICE : { type: "ice", id, target, candidate }
+            // ICE candidate
             if (msg.type === "ice") {
-                const targetWs = clients.get(msg.target);
-                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                    targetWs.send(JSON.stringify({
-                        type: "ice",
-                        id: ws.userId,
-                        candidate: msg.candidate
-                    }));
-                }
+                const target = clients.get(msg.target);
+                if (target?.readyState === WebSocket.OPEN)
+                    target.send(JSON.stringify({ type: "ice", id: ws.userId, candidate: msg.candidate }));
                 return;
             }
 
-            // 5) Mic : { type: "mic", id, enabled }
+            // Micro ON/OFF
             if (msg.type === "mic") {
-                // On diffuse à tout le monde sauf l’émetteur
+                broadcastExcept(ws, { type: "mic", id: ws.userId, enabled: msg.enabled });
+                return;
+            }
+
+            // Message textuel — broadcast à tous les clients connectés
+            if (msg.type === "text_message") {
                 broadcastExcept(ws, {
-                    type: "mic",
-                    id: ws.userId,
-                    enabled: msg.enabled
+                    type: "text_message",
+                    channel_id: msg.channel_id,
+                    id: msg.id,
+                    content: msg.content,
+                    user_id: msg.user_id,
+                    username: msg.username,
+                    created_at: msg.created_at
                 });
                 return;
             }
@@ -90,23 +74,20 @@ function startWebSocket(server) {
             if (ws.userId && clients.has(ws.userId)) {
                 console.log("Client déconnecté :", ws.userId);
                 clients.delete(ws.userId);
-
-                // On pourrait notifier les autres si besoin
-                // broadcastExcept(ws, { type: "leave", id: ws.userId });
+                broadcastExcept(ws, { type: "leave", id: ws.userId });
             }
         });
     });
 
     function broadcastExcept(senderWs, obj) {
         const data = JSON.stringify(obj);
-        for (const [id, clientWs] of clients.entries()) {
-            if (clientWs !== senderWs && clientWs.readyState === WebSocket.OPEN) {
+        for (const [, clientWs] of clients.entries()) {
+            if (clientWs !== senderWs && clientWs.readyState === WebSocket.OPEN)
                 clientWs.send(data);
-            }
         }
     }
 
-    console.log("WebSocket LightCall prêt (mode WebRTC)");
+    console.log("WebSocket LightCall prêt");
 }
 
 module.exports = startWebSocket;

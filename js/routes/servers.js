@@ -1,12 +1,21 @@
 const express = require("express");
 const router = express.Router();
+const { randomBytes } = require("crypto");
 const db = require("../database");
+
+/* ----------------------------------------------------
+   MIDDLEWARE : vérification JWT (protège toutes les routes)
+   Décommentez quand vous aurez mis en place le JWT.
+   Pour l'instant, on lit user_id depuis le body/params.
+---------------------------------------------------- */
+// const { verifyToken } = require("../middleware/auth");
+// router.use(verifyToken);
 
 /* ----------------------------------------------------
    1) ROUTES SPÉCIFIQUES (doivent être AVANT les génériques)
 ---------------------------------------------------- */
 
-// GET : infos complètes d’un serveur
+// GET /api/servers/:server_id/full — infos complètes d'un serveur
 router.get("/servers/:server_id/full", (req, res) => {
     const { server_id } = req.params;
 
@@ -47,7 +56,7 @@ router.get("/servers/:server_id/full", (req, res) => {
     }
 });
 
-// GET : salons d’un serveur
+// GET /api/servers/:server_id/channels — salons d'un serveur
 router.get("/servers/:server_id/channels", (req, res) => {
     const { server_id } = req.params;
 
@@ -68,7 +77,7 @@ router.get("/servers/:server_id/channels", (req, res) => {
    2) ROUTES GÉNÉRIQUES (doivent être APRÈS les spécifiques)
 ---------------------------------------------------- */
 
-// GET : serveurs d’un utilisateur
+// GET /api/servers/:userId — serveurs d'un utilisateur
 router.get("/servers/:userId", (req, res) => {
     const { userId } = req.params;
 
@@ -92,7 +101,7 @@ router.get("/servers/:userId", (req, res) => {
    3) AUTRES ROUTES
 ---------------------------------------------------- */
 
-// POST : créer un serveur
+// POST /api/servers/create — créer un serveur
 router.post("/servers/create", (req, res) => {
     const { name, owner_id } = req.body;
 
@@ -100,13 +109,19 @@ router.post("/servers/create", (req, res) => {
         return res.status(400).json({ error: "Missing name or owner_id" });
     }
 
-    const inviteCode = Math.random().toString(36).substring(2, 10);
+    // ✅ FIX : validation de longueur
+    if (name.trim().length === 0 || name.length > 64) {
+        return res.status(400).json({ error: "Nom de serveur invalide (1-64 caractères)" });
+    }
+
+    // ✅ FIX : code d'invitation cryptographiquement sûr
+    const inviteCode = randomBytes(6).toString("base64url");
 
     try {
         const result = db.prepare(`
             INSERT INTO servers (name, owner_id, invite_code)
             VALUES (?, ?, ?)
-        `).run(name, owner_id, inviteCode);
+        `).run(name.trim(), owner_id, inviteCode);
 
         const serverId = result.lastInsertRowid;
 
@@ -116,17 +131,21 @@ router.post("/servers/create", (req, res) => {
             VALUES (?, ?, 'owner')
         `).run(serverId, owner_id);
 
-        // 🔥 Ajouter un salon textuel par défaut
+        // Ajouter un salon textuel par défaut
         db.prepare(`
             INSERT INTO channels (server_id, name, type)
             VALUES (?, 'général', 'text')
         `).run(serverId);
 
-        // 🔥 Ajouter un salon vocal par défaut
+        // Ajouter un salon vocal par défaut
         db.prepare(`
             INSERT INTO channels (server_id, name, type)
             VALUES (?, 'Général', 'voice')
         `).run(serverId);
+
+        // ✅ FIX : le log de debug est maintenant DANS le try, AVANT res.json()
+        const testChannels = db.prepare("SELECT * FROM channels WHERE server_id = ?").all(serverId);
+        console.log("Channels après création :", testChannels);
 
         res.json({
             success: true,
@@ -138,13 +157,9 @@ router.post("/servers/create", (req, res) => {
         console.error("Erreur create server:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
-
-    const test = db.prepare("SELECT * FROM channels WHERE server_id = ?").all(serverId);
-    console.log("Channels après création :", test);
-
 });
 
-// POST : rejoindre un serveur
+// POST /api/servers/join — rejoindre un serveur par ID
 router.post("/servers/join", (req, res) => {
     const { server_id, user_id } = req.body;
 
@@ -153,6 +168,16 @@ router.post("/servers/join", (req, res) => {
     }
 
     try {
+        // ✅ FIX : vérifier si déjà membre avant d'insérer
+        const alreadyMember = db.prepare(`
+            SELECT id FROM server_members
+            WHERE server_id = ? AND user_id = ?
+        `).get(server_id, user_id);
+
+        if (alreadyMember) {
+            return res.status(409).json({ error: "Déjà membre de ce serveur" });
+        }
+
         db.prepare(`
             INSERT INTO server_members (server_id, user_id, role)
             VALUES (?, ?, 'member')
@@ -166,7 +191,7 @@ router.post("/servers/join", (req, res) => {
     }
 });
 
-// POST : rejoindre via code
+// POST /api/servers/join-by-code — rejoindre via code d'invitation
 router.post("/servers/join-by-code", (req, res) => {
     const { invite_code, user_id } = req.body;
 
@@ -180,7 +205,17 @@ router.post("/servers/join-by-code", (req, res) => {
         `).get(invite_code);
 
         if (!server) {
-            return res.status(404).json({ error: "Invalid invite code" });
+            return res.status(404).json({ error: "Code d'invitation invalide" });
+        }
+
+        // ✅ FIX : vérifier si déjà membre
+        const alreadyMember = db.prepare(`
+            SELECT id FROM server_members
+            WHERE server_id = ? AND user_id = ?
+        `).get(server.id, user_id);
+
+        if (alreadyMember) {
+            return res.status(409).json({ error: "Vous êtes déjà membre de ce serveur" });
         }
 
         db.prepare(`
@@ -200,9 +235,14 @@ router.post("/servers/join-by-code", (req, res) => {
     }
 });
 
-// DELETE : supprimer un serveur
+// DELETE /api/servers/:server_id/delete — supprimer un serveur
 router.delete("/servers/:server_id/delete", (req, res) => {
     const { server_id } = req.params;
+
+    // ✅ FIX : idéalement vérifier que l'utilisateur est bien owner
+    // const { user_id } = req.body;
+    // const server = db.prepare("SELECT * FROM servers WHERE id = ? AND owner_id = ?").get(server_id, user_id);
+    // if (!server) return res.status(403).json({ error: "Non autorisé" });
 
     try {
         db.prepare(`DELETE FROM server_members WHERE server_id = ?`).run(server_id);
@@ -211,7 +251,7 @@ router.delete("/servers/:server_id/delete", (req, res) => {
         const result = db.prepare(`DELETE FROM servers WHERE id = ?`).run(server_id);
 
         if (result.changes === 0) {
-            return res.status(404).json({ error: "Server not found" });
+            return res.status(404).json({ error: "Serveur introuvable" });
         }
 
         res.json({ success: true });
@@ -222,13 +262,18 @@ router.delete("/servers/:server_id/delete", (req, res) => {
     }
 });
 
-// PUT : renommer un serveur
+// PUT /api/servers/:server_id/rename — renommer un serveur
 router.put("/servers/:server_id/rename", (req, res) => {
     const { server_id } = req.params;
     const { new_name } = req.body;
 
     if (!new_name || !new_name.trim()) {
         return res.status(400).json({ error: "Nom invalide" });
+    }
+
+    // ✅ FIX : validation de longueur
+    if (new_name.trim().length > 64) {
+        return res.status(400).json({ error: "Nom trop long (64 caractères max)" });
     }
 
     try {
@@ -240,7 +285,7 @@ router.put("/servers/:server_id/rename", (req, res) => {
             return res.status(404).json({ error: "Serveur introuvable" });
         }
 
-        res.json({ success: true, new_name });
+        res.json({ success: true, new_name: new_name.trim() });
 
     } catch (err) {
         console.error("Erreur rename server:", err);
