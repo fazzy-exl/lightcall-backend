@@ -1,69 +1,76 @@
-const Database = require("better-sqlite3");
-const db = new Database("lightcall.db");
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
+const { Pool } = require("pg");
 
-// Active les clés étrangères
-db.pragma("foreign_keys = ON");
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
-// TABLE : USERS
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`).run();
+// -----------------------------
+// Initialiser les tables
+// -----------------------------
+async function initDB() {
+    const client = await pool.connect();
+    try {
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `);
 
-// TABLE : SERVERS
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS servers (
-                                           id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                           name TEXT NOT NULL,
-                                           owner_id INTEGER NOT NULL,
-                                           invite_code TEXT UNIQUE NOT NULL,
-                                           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`).run();
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS servers (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                owner_id INTEGER NOT NULL,
+                invite_code TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `);
 
-try { db.prepare(`ALTER TABLE servers ADD COLUMN invite_code TEXT`).run(); } catch (e) {}
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS server_members (
+                id SERIAL PRIMARY KEY,
+                server_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT DEFAULT 'member'
+            )
+        `);
 
-// TABLE : SERVER MEMBERS
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS server_members (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        server_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        role TEXT DEFAULT 'member'
-    )
-`).run();
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS channels (
+                id SERIAL PRIMARY KEY,
+                server_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL
+            )
+        `);
 
-// TABLE : CHANNELS
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS channels (
-                                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                            server_id INTEGER NOT NULL,
-                                            name TEXT NOT NULL,
-                                            type TEXT NOT NULL
-    )
-`).run();
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                channel_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        `);
 
-try { db.prepare(`ALTER TABLE channels ADD COLUMN type TEXT`).run(); } catch (e) {}
+        // Index pour les performances
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_members_server ON server_members(server_id)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_members_user ON server_members(user_id)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_channels_server ON channels(server_id)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id)`);
 
-// TABLE : MESSAGES
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        content TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`).run();
+        console.log("Base de données PostgreSQL initialisée ✅");
+    } finally {
+        client.release();
+    }
+}
 
-// INDEX pour les performances
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_members_server ON server_members(server_id)`).run();
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_members_user ON server_members(user_id)`).run();
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_channels_server ON channels(server_id)`).run();
-db.prepare(`CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id)`).run();
+initDB().catch(err => console.error("Erreur init DB:", err));
 
-module.exports = db;
+module.exports = pool;

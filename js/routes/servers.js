@@ -1,166 +1,123 @@
 const express = require("express");
 const router = express.Router();
 const { randomBytes } = require("crypto");
-const db = require("../database");
+const pool = require("../database");
 
-/* ----------------------------------------------------
-   MIDDLEWARE : vérification JWT (protège toutes les routes)
-   Décommentez quand vous aurez mis en place le JWT.
-   Pour l'instant, on lit user_id depuis le body/params.
----------------------------------------------------- */
-// const { verifyToken } = require("../middleware/auth");
-// router.use(verifyToken);
-
-/* ----------------------------------------------------
-   1) ROUTES SPÉCIFIQUES (doivent être AVANT les génériques)
----------------------------------------------------- */
-
-// GET /api/servers/:server_id/full — infos complètes d'un serveur
-router.get("/servers/:server_id/full", (req, res) => {
+// GET /servers/:server_id/full
+router.get("/servers/:server_id/full", async (req, res) => {
     const { server_id } = req.params;
-
     try {
-        const server = db.prepare(`
-            SELECT id, name, owner_id, invite_code
-            FROM servers
-            WHERE id = ?
-        `).get(server_id);
-
-        if (!server) {
+        const server = await pool.query(
+            `SELECT id, name, owner_id, invite_code FROM servers WHERE id = $1`,
+            [server_id]
+        );
+        if (!server.rows[0]) {
             return res.status(404).json({ error: "Serveur introuvable" });
         }
 
-        const channels = db.prepare(`
-            SELECT id, name, type
-            FROM channels
-            WHERE server_id = ?
-        `).all(server_id);
+        const channels = await pool.query(
+            `SELECT id, name, type FROM channels WHERE server_id = $1`,
+            [server_id]
+        );
 
-        const members = db.prepare(`
-            SELECT users.id, users.username, server_members.role
-            FROM server_members
-            JOIN users ON users.id = server_members.user_id
-            WHERE server_members.server_id = ?
-        `).all(server_id);
+        const members = await pool.query(
+            `SELECT users.id, users.username, server_members.role
+             FROM server_members
+             JOIN users ON users.id = server_members.user_id
+             WHERE server_members.server_id = $1`,
+            [server_id]
+        );
 
+        const allChannels = channels.rows;
         res.json({
-            ...server,
-            text_channels: channels.filter(c => c.type === "text"),
-            voice_channels: channels.filter(c => c.type === "voice"),
-            members
+            ...server.rows[0],
+            text_channels: allChannels.filter(c => c.type === "text"),
+            voice_channels: allChannels.filter(c => c.type === "voice"),
+            members: members.rows
         });
-
     } catch (err) {
         console.error("Erreur GET full server:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-// GET /api/servers/:server_id/channels — salons d'un serveur
-router.get("/servers/:server_id/channels", (req, res) => {
+// GET /servers/:server_id/channels
+router.get("/servers/:server_id/channels", async (req, res) => {
     const { server_id } = req.params;
-
     try {
-        const channels = db.prepare(`
-            SELECT * FROM channels WHERE server_id = ?
-        `).all(server_id);
-
-        res.json(channels);
-
+        const result = await pool.query(
+            `SELECT * FROM channels WHERE server_id = $1`,
+            [server_id]
+        );
+        res.json(result.rows);
     } catch (err) {
         console.error("Erreur channels:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-/* ----------------------------------------------------
-   2) ROUTES GÉNÉRIQUES (doivent être APRÈS les spécifiques)
----------------------------------------------------- */
-
-// GET /api/servers/:userId — serveurs d'un utilisateur
-router.get("/servers/:userId", (req, res) => {
+// GET /servers/:userId — serveurs d'un utilisateur
+router.get("/servers/:userId", async (req, res) => {
     const { userId } = req.params;
-
     try {
-        const servers = db.prepare(`
-            SELECT servers.id, servers.name, servers.owner_id
-            FROM servers
-            JOIN server_members ON servers.id = server_members.server_id
-            WHERE server_members.user_id = ?
-        `).all(userId);
-
-        res.json(servers);
-
+        const result = await pool.query(
+            `SELECT servers.id, servers.name, servers.owner_id
+             FROM servers
+             JOIN server_members ON servers.id = server_members.server_id
+             WHERE server_members.user_id = $1`,
+            [userId]
+        );
+        res.json(result.rows);
     } catch (err) {
         console.error("Erreur GET servers:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-/* ----------------------------------------------------
-   3) AUTRES ROUTES
----------------------------------------------------- */
-
-// POST /api/servers/create — créer un serveur
-router.post("/servers/create", (req, res) => {
+// POST /servers/create
+router.post("/servers/create", async (req, res) => {
     const { name, owner_id } = req.body;
 
     if (!name || !owner_id) {
         return res.status(400).json({ error: "Missing name or owner_id" });
     }
-
-    // ✅ FIX : validation de longueur
     if (name.trim().length === 0 || name.length > 64) {
         return res.status(400).json({ error: "Nom de serveur invalide (1-64 caractères)" });
     }
 
-    // ✅ FIX : code d'invitation cryptographiquement sûr
     const inviteCode = randomBytes(6).toString("base64url");
 
     try {
-        const result = db.prepare(`
-            INSERT INTO servers (name, owner_id, invite_code)
-            VALUES (?, ?, ?)
-        `).run(name.trim(), owner_id, inviteCode);
+        const result = await pool.query(
+            `INSERT INTO servers (name, owner_id, invite_code) VALUES ($1, $2, $3) RETURNING id`,
+            [name.trim(), owner_id, inviteCode]
+        );
+        const serverId = result.rows[0].id;
 
-        const serverId = result.lastInsertRowid;
+        await pool.query(
+            `INSERT INTO server_members (server_id, user_id, role) VALUES ($1, $2, 'owner')`,
+            [serverId, owner_id]
+        );
 
-        // Ajouter le créateur comme owner
-        db.prepare(`
-            INSERT INTO server_members (server_id, user_id, role)
-            VALUES (?, ?, 'owner')
-        `).run(serverId, owner_id);
+        await pool.query(
+            `INSERT INTO channels (server_id, name, type) VALUES ($1, 'général', 'text')`,
+            [serverId]
+        );
 
-        // Ajouter un salon textuel par défaut
-        db.prepare(`
-            INSERT INTO channels (server_id, name, type)
-            VALUES (?, 'général', 'text')
-        `).run(serverId);
+        await pool.query(
+            `INSERT INTO channels (server_id, name, type) VALUES ($1, 'Général', 'voice')`,
+            [serverId]
+        );
 
-        // Ajouter un salon vocal par défaut
-        db.prepare(`
-            INSERT INTO channels (server_id, name, type)
-            VALUES (?, 'Général', 'voice')
-        `).run(serverId);
-
-        // ✅ FIX : le log de debug est maintenant DANS le try, AVANT res.json()
-        const testChannels = db.prepare("SELECT * FROM channels WHERE server_id = ?").all(serverId);
-        console.log("Channels après création :", testChannels);
-
-        res.json({
-            success: true,
-            server_id: serverId,
-            invite_code: inviteCode
-        });
-
+        res.json({ success: true, server_id: serverId, invite_code: inviteCode });
     } catch (err) {
         console.error("Erreur create server:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-// POST /api/servers/join — rejoindre un serveur par ID
-router.post("/servers/join", (req, res) => {
+// POST /servers/join
+router.post("/servers/join", async (req, res) => {
     const { server_id, user_id } = req.body;
 
     if (!server_id || !user_id) {
@@ -168,31 +125,27 @@ router.post("/servers/join", (req, res) => {
     }
 
     try {
-        // ✅ FIX : vérifier si déjà membre avant d'insérer
-        const alreadyMember = db.prepare(`
-            SELECT id FROM server_members
-            WHERE server_id = ? AND user_id = ?
-        `).get(server_id, user_id);
-
-        if (alreadyMember) {
+        const existing = await pool.query(
+            `SELECT id FROM server_members WHERE server_id = $1 AND user_id = $2`,
+            [server_id, user_id]
+        );
+        if (existing.rows[0]) {
             return res.status(409).json({ error: "Déjà membre de ce serveur" });
         }
 
-        db.prepare(`
-            INSERT INTO server_members (server_id, user_id, role)
-            VALUES (?, ?, 'member')
-        `).run(server_id, user_id);
-
+        await pool.query(
+            `INSERT INTO server_members (server_id, user_id, role) VALUES ($1, $2, 'member')`,
+            [server_id, user_id]
+        );
         res.json({ success: true });
-
     } catch (err) {
         console.error("Erreur join server:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-// POST /api/servers/join-by-code — rejoindre via code d'invitation
-router.post("/servers/join-by-code", (req, res) => {
+// POST /servers/join-by-code
+router.post("/servers/join-by-code", async (req, res) => {
     const { invite_code, user_id } = req.body;
 
     if (!invite_code || !user_id) {
@@ -200,93 +153,73 @@ router.post("/servers/join-by-code", (req, res) => {
     }
 
     try {
-        const server = db.prepare(`
-            SELECT * FROM servers WHERE invite_code = ?
-        `).get(invite_code);
-
-        if (!server) {
+        const server = await pool.query(
+            `SELECT * FROM servers WHERE invite_code = $1`,
+            [invite_code]
+        );
+        if (!server.rows[0]) {
             return res.status(404).json({ error: "Code d'invitation invalide" });
         }
 
-        // ✅ FIX : vérifier si déjà membre
-        const alreadyMember = db.prepare(`
-            SELECT id FROM server_members
-            WHERE server_id = ? AND user_id = ?
-        `).get(server.id, user_id);
-
-        if (alreadyMember) {
+        const existing = await pool.query(
+            `SELECT id FROM server_members WHERE server_id = $1 AND user_id = $2`,
+            [server.rows[0].id, user_id]
+        );
+        if (existing.rows[0]) {
             return res.status(409).json({ error: "Vous êtes déjà membre de ce serveur" });
         }
 
-        db.prepare(`
-            INSERT INTO server_members (server_id, user_id, role)
-            VALUES (?, ?, 'member')
-        `).run(server.id, user_id);
+        await pool.query(
+            `INSERT INTO server_members (server_id, user_id, role) VALUES ($1, $2, 'member')`,
+            [server.rows[0].id, user_id]
+        );
 
-        res.json({
-            success: true,
-            server_id: server.id,
-            server_name: server.name
-        });
-
+        res.json({ success: true, server_id: server.rows[0].id, server_name: server.rows[0].name });
     } catch (err) {
         console.error("Erreur join-by-code:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-// DELETE /api/servers/:server_id/delete — supprimer un serveur
-router.delete("/servers/:server_id/delete", (req, res) => {
+// DELETE /servers/:server_id/delete
+router.delete("/servers/:server_id/delete", async (req, res) => {
     const { server_id } = req.params;
-
-    // ✅ FIX : idéalement vérifier que l'utilisateur est bien owner
-    // const { user_id } = req.body;
-    // const server = db.prepare("SELECT * FROM servers WHERE id = ? AND owner_id = ?").get(server_id, user_id);
-    // if (!server) return res.status(403).json({ error: "Non autorisé" });
-
     try {
-        db.prepare(`DELETE FROM server_members WHERE server_id = ?`).run(server_id);
-        db.prepare(`DELETE FROM channels WHERE server_id = ?`).run(server_id);
+        await pool.query(`DELETE FROM server_members WHERE server_id = $1`, [server_id]);
+        await pool.query(`DELETE FROM channels WHERE server_id = $1`, [server_id]);
+        const result = await pool.query(`DELETE FROM servers WHERE id = $1`, [server_id]);
 
-        const result = db.prepare(`DELETE FROM servers WHERE id = ?`).run(server_id);
-
-        if (result.changes === 0) {
+        if (result.rowCount === 0) {
             return res.status(404).json({ error: "Serveur introuvable" });
         }
-
         res.json({ success: true });
-
     } catch (err) {
         console.error("Erreur delete server:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
 
-// PUT /api/servers/:server_id/rename — renommer un serveur
-router.put("/servers/:server_id/rename", (req, res) => {
+// PUT /servers/:server_id/rename
+router.put("/servers/:server_id/rename", async (req, res) => {
     const { server_id } = req.params;
     const { new_name } = req.body;
 
     if (!new_name || !new_name.trim()) {
         return res.status(400).json({ error: "Nom invalide" });
     }
-
-    // ✅ FIX : validation de longueur
     if (new_name.trim().length > 64) {
         return res.status(400).json({ error: "Nom trop long (64 caractères max)" });
     }
 
     try {
-        const result = db.prepare(`
-            UPDATE servers SET name = ? WHERE id = ?
-        `).run(new_name.trim(), server_id);
-
-        if (result.changes === 0) {
+        const result = await pool.query(
+            `UPDATE servers SET name = $1 WHERE id = $2`,
+            [new_name.trim(), server_id]
+        );
+        if (result.rowCount === 0) {
             return res.status(404).json({ error: "Serveur introuvable" });
         }
-
         res.json({ success: true, new_name: new_name.trim() });
-
     } catch (err) {
         console.error("Erreur rename server:", err);
         res.status(500).json({ error: "Erreur serveur" });
