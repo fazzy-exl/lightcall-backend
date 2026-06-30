@@ -6,9 +6,6 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-// -----------------------------
-// Initialiser les tables
-// -----------------------------
 async function initDB() {
     const client = await pool.connect();
     try {
@@ -20,6 +17,11 @@ async function initDB() {
                 created_at TIMESTAMP DEFAULT NOW()
             )
         `);
+
+        // FIX : colonne avatar (base64), ajoutée si elle n'existe pas déjà
+        try {
+            await client.query(`ALTER TABLE users ADD COLUMN avatar_url TEXT`);
+        } catch (e) { /* colonne déjà existante */ }
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS servers (
@@ -59,7 +61,6 @@ async function initDB() {
             )
         `);
 
-        // Index pour les performances
         await client.query(`CREATE INDEX IF NOT EXISTS idx_members_server ON server_members(server_id)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_members_user ON server_members(user_id)`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_channels_server ON channels(server_id)`);
