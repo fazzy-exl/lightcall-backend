@@ -3,6 +3,55 @@ const router = express.Router();
 const { randomBytes } = require("crypto");
 const pool = require("../database");
 
+// GET /servers/by-code/:invite_code/full
+router.get("/servers/by-code/:invite_code/full", async (req, res) => {
+    const { invite_code } = req.params;
+    try {
+        const server = await pool.query(
+            `SELECT id, name, owner_id, invite_code FROM servers WHERE invite_code = $1`,
+            [invite_code]
+        );
+        if (!server.rows[0]) return res.status(404).json({ error: "Serveur introuvable" });
+
+        const serverId = server.rows[0].id;
+
+        const channels = await pool.query(`SELECT id, name, type FROM channels WHERE server_id = $1`, [serverId]);
+        const members = await pool.query(
+            `SELECT users.id, users.username, server_members.role
+             FROM server_members JOIN users ON users.id = server_members.user_id
+             WHERE server_members.server_id = $1`, [serverId]
+        );
+
+        res.json({
+            ...server.rows[0],
+            text_channels: channels.rows.filter(c => c.type === "text"),
+            voice_channels: channels.rows.filter(c => c.type === "voice"),
+            members: members.rows
+        });
+    } catch (err) {
+        console.error("Erreur by-code full:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+// GET /servers/:userId — liste des serveurs d'un utilisateur
+router.get("/servers/:userId", async (req, res) => {
+    const { userId } = req.params;
+    try {
+        const result = await pool.query(
+            `SELECT servers.id, servers.name, servers.owner_id, servers.invite_code
+             FROM servers
+             JOIN server_members ON servers.id = server_members.server_id
+             WHERE server_members.user_id = $1`,
+            [userId]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error("Erreur GET servers:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
 // GET /servers/:server_id/full
 router.get("/servers/:server_id/full", async (req, res) => {
     const { server_id } = req.params;
@@ -52,37 +101,6 @@ router.get("/servers/:server_id/channels", async (req, res) => {
         res.json(result.rows);
     } catch (err) {
         console.error("Erreur channels:", err);
-        res.status(500).json({ error: "Erreur serveur" });
-    }
-});
-
-// GET /servers/by-code/:invite_code/full
-router.get("/servers/by-code/:invite_code/full", async (req, res) => {
-    const { invite_code } = req.params;
-    try {
-        const server = await pool.query(
-            `SELECT id, name, owner_id, invite_code FROM servers WHERE invite_code = $1`,
-            [invite_code]
-        );
-        if (!server.rows[0]) return res.status(404).json({ error: "Serveur introuvable" });
-
-        const serverId = server.rows[0].id;
-
-        const channels = await pool.query(`SELECT id, name, type FROM channels WHERE server_id = $1`, [serverId]);
-        const members = await pool.query(
-            `SELECT users.id, users.username, server_members.role
-             FROM server_members JOIN users ON users.id = server_members.user_id
-             WHERE server_members.server_id = $1`, [serverId]
-        );
-
-        res.json({
-            ...server.rows[0],
-            text_channels: channels.rows.filter(c => c.type === "text"),
-            voice_channels: channels.rows.filter(c => c.type === "voice"),
-            members: members.rows
-        });
-    } catch (err) {
-        console.error("Erreur by-code full:", err);
         res.status(500).json({ error: "Erreur serveur" });
     }
 });
