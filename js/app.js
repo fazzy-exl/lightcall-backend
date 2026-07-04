@@ -12,7 +12,7 @@ const serverRoutes = require("./routes/servers");
 const authRoutes = require("./routes/auth");
 const messageRoutes = require("./routes/messages");
 
-app.use("/api", serverRoutes);
+app.use(serverRoutes);
 app.use(authRoutes);
 app.use(messageRoutes);
 
