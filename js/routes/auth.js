@@ -46,7 +46,9 @@ router.post("/login", async (req, res) => {
 router.get("/users/:id", async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT id, username, created_at, avatar_url, avatar_original, google_id FROM users WHERE id = $1`,
+            `SELECT id, username, created_at, avatar_url, avatar_original, google_id,
+                    (password_hash IS NOT NULL) AS has_password
+             FROM users WHERE id = $1`,
             [req.params.id]
         );
         if (!result.rows[0]) return res.status(404).json({ error: "User not found" });
