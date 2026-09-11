@@ -13,14 +13,17 @@ async function initDB() {
             CREATE TABLE IF NOT EXISTS users (
                                                  id SERIAL PRIMARY KEY,
                                                  username TEXT UNIQUE NOT NULL,
-                                                 password_hash TEXT NOT NULL,
+                                                 password_hash TEXT,
                                                  created_at TIMESTAMP DEFAULT NOW()
                 )
         `);
 
         try { await client.query(`ALTER TABLE users ADD COLUMN avatar_url TEXT`); } catch (e) {}
-        // FIX : colonne pour la photo originale non recadrée (pour pouvoir re-recadrer librement)
         try { await client.query(`ALTER TABLE users ADD COLUMN avatar_original TEXT`); } catch (e) {}
+        // FIX : colonne pour lier un compte Google
+        try { await client.query(`ALTER TABLE users ADD COLUMN google_id TEXT UNIQUE`); } catch (e) {}
+        // FIX : rendre password_hash nullable pour les comptes Google (au cas où la table existait déjà avec NOT NULL)
+        try { await client.query(`ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`); } catch (e) {}
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS servers (

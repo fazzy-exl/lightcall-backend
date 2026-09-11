@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../database");
 const bcrypt = require("bcrypt");
+const { OAuth2Client } = require("google-auth-library");
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 router.post("/register", async (req, res) => {
     const { username, password } = req.body;
@@ -104,6 +106,59 @@ router.put("/users/:id/avatar", async (req, res) => {
     } catch (err) {
         console.error("Erreur upload avatar:", err);
         res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
+// POST /auth/google
+router.post("/auth/google", async (req, res) => {
+    const { credential } = req.body;
+
+    if (!credential) {
+        return res.status(400).json({ error: "Token Google manquant" });
+    }
+
+    try {
+        // Vérifie le token auprès de Google
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
+
+        const payload = ticket.getPayload();
+        const googleId = payload.sub;
+        const email = payload.email;
+        const name = payload.name || email.split("@")[0];
+        const picture = payload.picture;
+
+        // Vérifie si un compte existe déjà avec ce google_id
+        let result = await pool.query(`SELECT * FROM users WHERE google_id = $1`, [googleId]);
+        let user = result.rows[0];
+
+        if (!user) {
+            // Génère un nom d'utilisateur unique basé sur le nom Google
+            let baseUsername = name.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 24) || "user";
+            let username = baseUsername;
+            let suffix = 0;
+
+            while (true) {
+                const existing = await pool.query(`SELECT id FROM users WHERE username = $1`, [username]);
+                if (!existing.rows[0]) break;
+                suffix++;
+                username = `${baseUsername}${suffix}`;
+            }
+
+            const insertResult = await pool.query(
+                `INSERT INTO users (username, google_id, avatar_url) VALUES ($1, $2, $3) RETURNING id`,
+                [username, googleId, picture || null]
+            );
+            user = { id: insertResult.rows[0].id, username };
+        }
+
+        res.json({ success: true, user_id: user.id });
+
+    } catch (err) {
+        console.error("Erreur auth Google:", err);
+        res.status(401).json({ error: "Authentification Google invalide" });
     }
 });
 
