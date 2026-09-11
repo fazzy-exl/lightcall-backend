@@ -46,7 +46,7 @@ router.post("/login", async (req, res) => {
 router.get("/users/:id", async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT id, username, created_at, avatar_url, avatar_original FROM users WHERE id = $1`,
+            `SELECT id, username, created_at, avatar_url, avatar_original, google_id FROM users WHERE id = $1`,
             [req.params.id]
         );
         if (!result.rows[0]) return res.status(404).json({ error: "User not found" });
@@ -158,6 +158,39 @@ router.post("/auth/google", async (req, res) => {
 
     } catch (err) {
         console.error("Erreur auth Google:", err);
+        res.status(401).json({ error: "Authentification Google invalide" });
+    }
+});
+
+// POST /auth/google/link — lier un compte Google à un compte déjà connecté
+router.post("/auth/google/link", async (req, res) => {
+    const { user_id, credential } = req.body;
+
+    if (!user_id || !credential) {
+        return res.status(400).json({ error: "Données manquantes" });
+    }
+
+    try {
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID
+        });
+
+        const payload = ticket.getPayload();
+        const googleId = payload.sub;
+
+        // Vérifie que ce compte Google n'est pas déjà lié à un autre utilisateur
+        const existing = await pool.query(`SELECT id FROM users WHERE google_id = $1`, [googleId]);
+        if (existing.rows[0] && String(existing.rows[0].id) !== String(user_id)) {
+            return res.status(409).json({ error: "Ce compte Google est déjà lié à un autre utilisateur LightCall" });
+        }
+
+        await pool.query(`UPDATE users SET google_id = $1 WHERE id = $2`, [googleId, user_id]);
+
+        res.json({ success: true });
+
+    } catch (err) {
+        console.error("Erreur liaison Google:", err);
         res.status(401).json({ error: "Authentification Google invalide" });
     }
 });
