@@ -195,4 +195,34 @@ router.post("/auth/google/link", async (req, res) => {
     }
 });
 
+// POST /auth/google/unlink — délier un compte Google
+router.post("/auth/google/unlink", async (req, res) => {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+        return res.status(400).json({ error: "user_id manquant" });
+    }
+
+    try {
+        // Vérifie que l'utilisateur a bien un mot de passe (sinon il perdrait tout accès à son compte)
+        const result = await pool.query(`SELECT password_hash FROM users WHERE id = $1`, [user_id]);
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(404).json({ error: "Utilisateur introuvable" });
+        }
+
+        if (!user.password_hash) {
+            return res.status(400).json({ error: "Tu dois d'abord définir un mot de passe avant de délier Google, sinon tu perdrais l'accès à ton compte." });
+        }
+
+        await pool.query(`UPDATE users SET google_id = NULL WHERE id = $1`, [user_id]);
+        res.json({ success: true });
+
+    } catch (err) {
+        console.error("Erreur déliaison Google:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
 module.exports = router;
