@@ -227,4 +227,29 @@ router.post("/auth/google/unlink", async (req, res) => {
     }
 });
 
+// DELETE /users/:id — supprimer complètement un compte
+router.delete("/users/:id", async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query(`DELETE FROM server_members WHERE user_id = $1`, [id]);
+        await pool.query(`DELETE FROM messages WHERE user_id = $1`, [id]);
+
+        const owned = await pool.query(`SELECT id FROM servers WHERE owner_id = $1`, [id]);
+        for (const server of owned.rows) {
+            await pool.query(`DELETE FROM server_members WHERE server_id = $1`, [server.id]);
+            await pool.query(`DELETE FROM channels WHERE server_id = $1`, [server.id]);
+            await pool.query(`DELETE FROM servers WHERE id = $1`, [server.id]);
+        }
+
+        const result = await pool.query(`DELETE FROM users WHERE id = $1`, [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: "Utilisateur introuvable" });
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error("Erreur suppression compte:", err);
+        res.status(500).json({ error: "Erreur serveur" });
+    }
+});
+
 module.exports = router;
