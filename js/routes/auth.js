@@ -120,7 +120,6 @@ router.post("/auth/google", async (req, res) => {
     }
 
     try {
-        // Vérifie le token auprès de Google
         const ticket = await googleClient.verifyIdToken({
             idToken: credential,
             audience: process.env.GOOGLE_CLIENT_ID
@@ -132,12 +131,10 @@ router.post("/auth/google", async (req, res) => {
         const name = payload.name || email.split("@")[0];
         const picture = payload.picture;
 
-        // Vérifie si un compte existe déjà avec ce google_id
         let result = await pool.query(`SELECT * FROM users WHERE google_id = $1`, [googleId]);
         let user = result.rows[0];
 
         if (!user) {
-            // Génère un nom d'utilisateur unique basé sur le nom Google
             let baseUsername = name.replace(/[^a-zA-Z0-9_]/g, "").slice(0, 24) || "user";
             let username = baseUsername;
             let suffix = 0;
@@ -149,9 +146,22 @@ router.post("/auth/google", async (req, res) => {
                 username = `${baseUsername}${suffix}`;
             }
 
+            // FIX : télécharger et convertir la photo Google en base64 une seule fois
+            let avatarBase64 = null;
+            if (picture) {
+                try {
+                    const imgRes = await fetch(picture);
+                    const buffer = await imgRes.arrayBuffer();
+                    const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+                    avatarBase64 = `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`;
+                } catch (imgErr) {
+                    console.error("Erreur téléchargement avatar Google:", imgErr);
+                }
+            }
+
             const insertResult = await pool.query(
                 `INSERT INTO users (username, google_id, avatar_url) VALUES ($1, $2, $3) RETURNING id`,
-                [username, googleId, picture || null]
+                [username, googleId, avatarBase64]
             );
             user = { id: insertResult.rows[0].id, username };
         }
