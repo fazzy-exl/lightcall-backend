@@ -1,20 +1,27 @@
 const express = require("express");
-const app = express();
 const cors = require("cors");
-const path = require("path");
+const http = require("http");
 
-// Middlewares
-app.use(cors());
-app.use(express.json());
-
-// Routes
 const serverRoutes = require("./routes/servers");
 const authRoutes = require("./routes/auth");
 const messageRoutes = require("./routes/messages");
+const startWebSocket = require("./websocket");
 
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// Routes API
 app.use(serverRoutes);
 app.use(authRoutes);
 app.use(messageRoutes);
 
+// WebSocket
+const server = http.createServer(app);
+startWebSocket(server);
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Backend LightCall lancé sur le port", PORT));
+server.listen(PORT, () => {
+    console.log("API + WebSocket LightCall en ligne sur le port " + PORT);
+});
