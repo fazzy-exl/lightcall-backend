@@ -8,12 +8,12 @@ router.get("/messages/:channel_id", async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT messages.id, messages.content, messages.created_at,
-                    users.id AS user_id, users.username
+                    users.id AS user_id, users.username, users.avatar_url
              FROM messages
-             JOIN users ON users.id = messages.user_id
+                      JOIN users ON users.id = messages.user_id
              WHERE messages.channel_id = $1
              ORDER BY messages.created_at ASC
-             LIMIT 50`,
+                 LIMIT 50`,
             [channel_id]
         );
         res.json(result.rows);
@@ -42,9 +42,9 @@ router.post("/messages", async (req, res) => {
 
         const message = await pool.query(
             `SELECT messages.id, messages.content, messages.created_at,
-                    users.id AS user_id, users.username
+                    users.id AS user_id, users.username, users.avatar_url
              FROM messages
-             JOIN users ON users.id = messages.user_id
+                      JOIN users ON users.id = messages.user_id
              WHERE messages.id = $1`,
             [result.rows[0].id]
         );
