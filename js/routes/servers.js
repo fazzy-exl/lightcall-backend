@@ -17,7 +17,7 @@ router.get("/servers/by-code/:invite_code/full", async (req, res) => {
 
         const channels = await pool.query(`SELECT id, name, type FROM channels WHERE server_id = $1`, [serverId]);
         const members = await pool.query(
-            `SELECT users.id, users.username, server_members.role
+            `SELECT users.id, users.username, users.avatar_url, server_members.role
              FROM server_members JOIN users ON users.id = server_members.user_id
              WHERE server_members.server_id = $1`, [serverId]
         );
@@ -70,7 +70,7 @@ router.get("/servers/:server_id/full", async (req, res) => {
         );
 
         const members = await pool.query(
-            `SELECT users.id, users.username, server_members.role
+            `SELECT users.id, users.username, users.avatar_url, server_members.role
              FROM server_members
              JOIN users ON users.id = server_members.user_id
              WHERE server_members.server_id = $1`,
