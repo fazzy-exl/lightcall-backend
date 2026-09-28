@@ -105,6 +105,29 @@ router.get("/servers/:server_id/channels", async (req, res) => {
     }
 });
 
+router.post("/servers/:server_id/channels", async (req, res) => {
+    const { server_id } = req.params;
+    const { name, type } = req.body;
+
+    if (!name || !name.trim()) {
+        return res.status(400).json({ success: false, error: "Le nom du salon est requis." });
+    }
+    if (type !== "text" && type !== "voice") {
+        return res.status(400).json({ success: false, error: "Type de salon invalide." });
+    }
+
+    try {
+        const result = await pool.query(
+            "INSERT INTO channels (server_id, name, type) VALUES ($1, $2, $3) RETURNING *",
+            [server_id, name.trim(), type]
+        );
+        res.json({ success: true, channel: result.rows[0] });
+    } catch (err) {
+        console.error("Erreur création salon:", err);
+        res.status(500).json({ success: false, error: "Erreur serveur." });
+    }
+});
+
 // POST /servers/create
 router.post("/servers/create", async (req, res) => {
     const { name, owner_id } = req.body;
